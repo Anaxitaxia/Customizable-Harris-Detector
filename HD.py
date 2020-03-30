@@ -1,15 +1,17 @@
 import numpy as np
-from scipy.ndimage import convolve
 from PIL import Image
 import time
 import cv2 as cv
+from scipy.ndimage.filters import convolve
+from scipy.ndimage.filters import gaussian_gradient_magnitude
+import scipy.special
 
 
 class HarrisDetector:
     # im --- массив numpy
     def __init__(self, im, wind_func='gauss', sigma=1, wind_size=3, response='harris',
-                 k=0.04, th_politic='adapt', p=0.005, non_maxima_fl=True, maxima_wind_size=3, log_log=False, b=None,
-                 cut_fl=False, cut_th=None):
+                 k=0.04, th_politic='adapt', p=0.005, non_maxima_fl=True, maxima_wind_size=3, log_log=False, b=0.1,
+                 cut_fl=False, cut_th=200, significant_fl=False):
         super().__init__()
         self.im = im
         self.wind_func = wind_func
@@ -27,15 +29,10 @@ class HarrisDetector:
         self.log_log = log_log
         if self.log_log:
             self.b = b
-            if not self.b:
-                print(f"{self.b} is not correct; number is expected")
-                raise NameError
         self.cut_fl = cut_fl
         if self.cut_fl:
             self.cut_th = cut_th
-            if not self.cut_th:
-                print(f"{self.cut_th} is not correct; number is expected")
-                raise NameError
+        self.significant_fl = significant_fl
 
     def create_windows(self):
         if self.wind_func == 'gauss':
@@ -95,6 +92,37 @@ class HarrisDetector:
                     new_im[i:i + 3, j:j + 3] = block
         self.im = new_im
 
+    def find_significant(self):
+        def convert_to_polar(x_coord, y_coord):
+            magnitude = np.sqrt(x_coord ** 2 + y_coord ** 2)
+            angle = np.arctan2(x_coord, y_coord)
+            return magnitude, angle
+
+        def convert_to_decart(magnitude, angle):
+            x_coord = magnitude * np.cos(angle)
+            y_coord = magnitude * np.sin(angle)
+            return x_coord, y_coord
+
+        f_i = np.fft.fft2(self.im)
+        rho, phi = convert_to_polar(np.real(f_i), np.imag(f_i))
+        l_f = np.log10(rho.clip(min=1e-9))
+        h = 1 / 9 * np.array([[1, 1, 1], [1, 1, 1], [1, 1, 1]])
+        h_l = convolve(l_f, h)
+        r_p = np.exp(l_f - h_l)
+        imag_part, real_part = convert_to_decart(r_p, phi)
+        img_combined = np.fft.ifft2(real_part + 1j * imag_part)
+        s_f, _ = convert_to_polar(np.real(img_combined), np.imag(img_combined))
+        s_f = gaussian_gradient_magnitude(s_f, (8, 0))
+        s_f = s_f ** 2
+        s_f = np.float32(s_f) / np.max(s_f)
+        # s_f = np.flipud(s_f)
+        # s_f = np.fliplr(s_f)
+        th = 3 * np.mean(s_f)
+        o_f = np.where(s_f > th, 1, 0)
+        o_f = scipy.ndimage.binary_dilation(o_f).astype(o_f.dtype)
+        o_f = scipy.ndimage.binary_erosion(o_f).astype(o_f.dtype)
+        return o_f
+
     def find_corners(self):
         def find_matrix_values(conv_wind, wind_x2, wind_y2, wind_xy):
             a = convolve(wind_x2, conv_wind, mode='constant', cval=0.0)
@@ -109,9 +137,11 @@ class HarrisDetector:
             return np.linalg.det(m) - self.k * (np.trace(m) ** 2)
 
         d_xy, d_x, d_y = self.create_windows()
-
         if self.cut_fl:
             self.cut_points()
+        if self.significant_fl:
+            obj_map = self.find_significant()
+            self.im = self.im * obj_map
         i_x2, i_y2, i_xy = self.find_derivatives(d_x, d_y)
         response_map = np.ones(self.im.shape)
         if self.response == 'harris':
