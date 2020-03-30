@@ -130,7 +130,8 @@ class HarrisDetector:
         x_corner, y_corner = np.where(corner_map != 0)
         return x_corner, y_corner, corner_map
 
-
+'''
+Пример использования
 image = Image.open('C://Users/Настя/PycharmProjects/FigCreator_v02/2 прав целиком/2019-8-17_8_39_7_4.png').convert('L')
 image.load()
 img = np.array(image)
@@ -145,3 +146,4 @@ for index in range(x.shape[0]):
     cv.circle(img, (x[index], y[index]), 5, 0, 2)
 image = Image.fromarray(img.astype('uint8'), 'L')
 image.show()
+'''
