@@ -5,6 +5,7 @@ import cv2 as cv
 from scipy.ndimage.filters import convolve
 from scipy.ndimage.filters import gaussian_gradient_magnitude
 import scipy.special
+from numpy import linalg as la
 
 
 class HarrisDetector:
@@ -36,7 +37,6 @@ class HarrisDetector:
 
     def create_windows(self):
         if self.wind_func == 'gauss':
-            # а надо быстрее?
             x_prewitt = np.ones((self.wind_size, self.wind_size))
             x_prewitt[:, 0] -= 2
             x_prewitt[:, 1] -= 1
@@ -47,6 +47,11 @@ class HarrisDetector:
             gaussian_x = x_prewitt * np.exp(-(x_prewitt ** 2 + y_prewitt ** 2) / (2 * self.sigma ** 2))
             gaussian_y = y_prewitt * np.exp(-(x_prewitt ** 2 + y_prewitt ** 2) / (2 * self.sigma ** 2))
             return gaussian_wind, gaussian_x, gaussian_y
+        elif self.wind_func == 'b-spline':
+            spline = 1 / 36 * np.array([[1, 4, 1], [4, 16, 4], [1, 4, 1]])
+            m_x = 1 / 12 * np.array([[1, 4, 1], [0, 0, 0], [-1, -4, -1]])
+            m_y = 1 / 12 * np.array([[1, 0, -1], [4, 0, -4], [1, 0, -1]])
+            return spline, m_x, m_y
 
     def find_derivatives(self, d_x, d_y):
         i_x = convolve(self.im, d_x, mode='constant', cval=0.0)
@@ -131,10 +136,18 @@ class HarrisDetector:
             return a, b, c
 
         def create_matrix(a, b, c):
-            return np.array([[a, c], [c, b]])
+            if self.response == 'harris':
+                return np.array([[a, c], [c, b]])
+            elif self.response == 'forstner':
+                m = np.array([[a, c], [c, b]])
+                _, v = la.eig(m)
+                return np.array(v)
 
         def find_response(m):
-            return np.linalg.det(m) - self.k * (np.trace(m) ** 2)
+            if self.response == 'harris':
+                return np.linalg.det(m) - self.k * (np.trace(m) ** 2)
+            elif self.response == 'forstner':
+                return la.det(m) / (np.trace(m) + 1e-5)
 
         d_xy, d_x, d_y = self.create_windows()
         if self.cut_fl:
@@ -143,16 +156,15 @@ class HarrisDetector:
             obj_map = self.find_significant()
             self.im = self.im * obj_map
         i_x2, i_y2, i_xy = self.find_derivatives(d_x, d_y)
-        response_map = np.ones(self.im.shape)
-        if self.response == 'harris':
-            mas_a, mas_b, mas_c = find_matrix_values(d_xy, i_x2, i_y2, i_xy)
-            mas_a = mas_a.reshape(mas_a.size)
-            mas_b = mas_b.reshape(mas_a.size)
-            mas_c = mas_c.reshape(mas_a.size)
-            matrix = np.array(list(map(create_matrix, mas_a, mas_b, mas_c)))
-            response_map = np.array(list(map(find_response, matrix))).reshape(self.im.shape)
+        mas_a, mas_b, mas_c = find_matrix_values(d_xy, i_x2, i_y2, i_xy)
+        mas_a = mas_a.reshape(mas_a.size)
+        mas_b = mas_b.reshape(mas_a.size)
+        mas_c = mas_c.reshape(mas_a.size)
+        matrix = np.array(list(map(create_matrix, mas_a, mas_b, mas_c)))
+        response_map = np.array(list(map(find_response, matrix))).reshape(self.im.shape)
+
         maximum = 1
-        corner_map = np.array([])
+        corner_map = np.ones(self.im.shape)
         if self.non_maxima_fl:
             corner_map, maximum = self.find_local_max(response_map)
         response_map = np.where(response_map > self.p * maximum, response_map, 0)
@@ -160,13 +172,14 @@ class HarrisDetector:
         x_corner, y_corner = np.where(corner_map != 0)
         return x_corner, y_corner, corner_map
 
-'''
-Пример использования
+
 image = Image.open('C://Users/Настя/PycharmProjects/FigCreator_v02/2 прав целиком/2019-8-17_8_39_7_4.png').convert('L')
 image.load()
 img = np.array(image)
 
-HD = HarrisDetector(img, k=0.06, p=0.015, maxima_wind_size=7, cut_fl=True, cut_th=50)
+'''
+Пример использования
+HD = HarrisDetector(img, p=0.015,)
 tstart = time.time()
 y, x, c_map = HD.find_corners()
 tfinish = time.time()
