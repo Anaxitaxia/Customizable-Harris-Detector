@@ -3,7 +3,8 @@ from scipy.ndimage.filters import convolve
 from scipy.ndimage.filters import gaussian_gradient_magnitude
 import scipy.special
 from numpy import linalg as la
-import time
+# import time
+from scipy.ndimage import maximum_filter
 
 
 class HarrisDetector:
@@ -65,20 +66,15 @@ class HarrisDetector:
         return i_x2, i_y2, i_xy
 
     def find_local_max(self, r_map):
-        # напрасное вычисление максимума, если пороговое значение не адаптивное
-        max_matrix = np.copy(r_map)
-        maximum = -1000
-
-        for i in range(0, r_map.shape[0], self.n):
-            for j in range(0, r_map.shape[1], self.n):
-                block = r_map[i:i + self.n, j:j + self.n]
-                sub = np.reshape(block, block.size)
-                max_matrix[i:i + self.n, j:j + self.n] = max(sub)
-                if max(sub) > maximum:
-                    maximum = max(sub)
-
+        # max_matrix = np.copy(r_map)
+        max_matrix = maximum_filter(r_map, self.n + 1, origin=(-1, 0))
+        # for i in range(0, r_map.shape[0], self.n):
+        #     for j in range(0, r_map.shape[1], self.n):
+        #         block = r_map[i:i + self.n, j:j + self.n]
+        #         sub = np.reshape(block, block.size)
+        #         max_matrix[i:i + self.n, j:j + self.n] = max(sub)
         corner_map = max_matrix == r_map
-        return corner_map, maximum
+        return corner_map
 
     def cut_points(self):
         def find_diff(item):
@@ -166,12 +162,10 @@ class HarrisDetector:
 
         corner_map = np.ones(self.im.shape)
         if self.non_maxima_fl:
-            tstart = time.time()
-            corner_map, maximum = self.find_local_max(response_map)
+            corner_map = self.find_local_max(response_map)
             # HD_cy.find_local_max(response_map, self.n)  # self.find_local_max(response_map)
-            tfinish = time.time()
-            print('Поиск локальных максимумов, сек: ', tfinish - tstart)
             if self.th_politic == 'adapt':
+                maximum = np.amax(response_map)
                 response_map = np.where(response_map > self.p * maximum, response_map, 0)
             else:
                 response_map = np.where(response_map > self.p, response_map, 0)
