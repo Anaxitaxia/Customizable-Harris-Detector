@@ -1,11 +1,9 @@
 import numpy as np
-from PIL import Image
-import time
-import cv2 as cv
 from scipy.ndimage.filters import convolve
 from scipy.ndimage.filters import gaussian_gradient_magnitude
 import scipy.special
 from numpy import linalg as la
+import time
 
 
 class HarrisDetector:
@@ -70,6 +68,7 @@ class HarrisDetector:
         # напрасное вычисление максимума, если пороговое значение не адаптивное
         max_matrix = np.copy(r_map)
         maximum = -1000
+
         for i in range(0, r_map.shape[0], self.n):
             for j in range(0, r_map.shape[1], self.n):
                 block = r_map[i:i + self.n, j:j + self.n]
@@ -77,6 +76,7 @@ class HarrisDetector:
                 max_matrix[i:i + self.n, j:j + self.n] = max(sub)
                 if max(sub) > maximum:
                     maximum = max(sub)
+
         corner_map = max_matrix == r_map
         return corner_map, maximum
 
@@ -93,7 +93,7 @@ class HarrisDetector:
                 block = self.im[i:i + 3, j:j + 3]
                 block_vect = np.reshape(block, block.size)
                 n_similar = sum(list(map(find_diff, block_vect)))
-                if 1 <= n_similar <= 7:
+                if 1 <= n_similar <= 6:
                     new_im[i:i + 3, j:j + 3] = block
         self.im = new_im
 
@@ -136,18 +136,15 @@ class HarrisDetector:
             return a, b, c
 
         def create_matrix(a, b, c):
-            if self.response == 'harris':
-                return np.array([[a, c], [c, b]])
-            elif self.response == 'forstner':
-                m = np.array([[a, c], [c, b]])
-                _, v = la.eig(m)
-                return np.array(v)
+            m = np.array([[a, c], [c, b]])
+            _, v = la.eig(m)
+            return np.array(v)
 
-        def find_response(m):
-            if self.response == 'harris':
-                return np.linalg.det(m) - self.k * (np.trace(m) ** 2)
-            elif self.response == 'forstner':
-                return la.det(m) / (np.trace(m) + 1e-5)
+        def find_harris_response(a, b, c):
+            return float(a) * float(b) - float(c) ** 2 - self.k * (float(a) + float(b)) ** 2
+
+        def find_forstner_response(m):
+            return la.det(m) / (np.trace(m) + 1e-5)
 
         d_xy, d_x, d_y = self.create_windows()
         if self.cut_fl:
@@ -160,25 +157,41 @@ class HarrisDetector:
         mas_a = mas_a.reshape(mas_a.size)
         mas_b = mas_b.reshape(mas_a.size)
         mas_c = mas_c.reshape(mas_a.size)
-        matrix = np.array(list(map(create_matrix, mas_a, mas_b, mas_c)))
-        response_map = np.array(list(map(find_response, matrix))).reshape(self.im.shape)
+        response_map = np.array([])
+        if self.response == 'harris':
+            response_map = np.array(list(map(find_harris_response, mas_a, mas_b, mas_c))).reshape(self.im.shape)
+        elif self.response == 'forstner':
+            matrix = np.array(list(map(create_matrix, mas_a, mas_b, mas_c)))
+            response_map = np.array(list(map(find_forstner_response, matrix))).reshape(self.im.shape)
 
-        maximum = 1
         corner_map = np.ones(self.im.shape)
         if self.non_maxima_fl:
+            tstart = time.time()
             corner_map, maximum = self.find_local_max(response_map)
-        response_map = np.where(response_map > self.p * maximum, response_map, 0)
+            # HD_cy.find_local_max(response_map, self.n)  # self.find_local_max(response_map)
+            tfinish = time.time()
+            print('Поиск локальных максимумов, сек: ', tfinish - tstart)
+            if self.th_politic == 'adapt':
+                response_map = np.where(response_map > self.p * maximum, response_map, 0)
+            else:
+                response_map = np.where(response_map > self.p, response_map, 0)
+        else:
+            if self.th_politic == 'adapt':
+                maximum = np.amax(response_map)
+                response_map = np.where(response_map > self.p * maximum, response_map, 0)
+            else:
+                response_map = np.where(response_map > self.p, response_map, 0)
         corner_map = corner_map * response_map
         x_corner, y_corner = np.where(corner_map != 0)
         return x_corner, y_corner, corner_map
 
 
+'''
+Пример использования
 image = Image.open('C://Users/Настя/PycharmProjects/FigCreator_v02/2 прав целиком/2019-8-17_8_39_7_4.png').convert('L')
 image.load()
 img = np.array(image)
 
-'''
-Пример использования
 HD = HarrisDetector(img, p=0.015,)
 tstart = time.time()
 y, x, c_map = HD.find_corners()
