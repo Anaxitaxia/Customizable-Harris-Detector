@@ -5,6 +5,7 @@ import cv2 as cv
 import time
 import os
 import concurrent.futures as cf
+import openpyxl
 
 
 def print_main_menu():
@@ -37,20 +38,66 @@ def find_corners(im_name):
     imag.load()
     im = np.array(imag)
     all_results = []
-    t1 = time.time()
     for k1 in k_list:
         for p1 in p_list:
             for b1 in b_list:
                 for non_max_size1 in non_max_size_list:
                     for cut_th1 in cut_th_list:
+                        t1 = time.time()
                         harris_det = HD.HarrisDetector(im, weight_func, sigma, weight_wind_size, resp, k1,
                                                        th_politic, p1, non_max_fl, non_max_size1, log_log,
                                                        b1, cut_fl, cut_th1, significant_fl)
+                        t2 = time.time()
                         y_coord, x_coord, corner_map = harris_det.find_corners()
-                        all_results.append(y_coord)
-    t2 = time.time()
-    print('Время на поиск углов, сек.: ', t2 - t1)
+                        all_results.append([im_name, x_coord, y_coord, t2 - t1, weight_func, resp, k1, p1, non_max_fl,
+                                            non_max_size1, log_log, b1, cut_fl, cut_th1, significant_fl])
     return all_results
+
+
+def save_results():
+    try:
+        wb = openpyxl.load_workbook(result_file)
+        sheet = wb.active
+    except FileNotFoundError:
+        wb = openpyxl.Workbook()
+        sheet = wb.active
+        sheet.cell(row=1, column=1, value='Имя')
+        sheet.cell(row=1, column=2, value='Координата x угла')
+        sheet.cell(row=1, column=3, value='Координата y угла')
+        sheet.cell(row=1, column=4, value='Время на поиск углов, сек')
+        sheet.cell(row=1, column=5, value='Весовая функция')
+        sheet.cell(row=1, column=6, value='Мера отклика')
+        sheet.cell(row=1, column=7, value='k')
+        sheet.cell(row=1, column=8, value='p')
+        sheet.cell(row=1, column=9, value='Метод подавления немаксимумов')
+        sheet.cell(row=1, column=10, value='Размер окна для подавления немаксимумов')
+        sheet.cell(row=1, column=11, value='log-log scaled')
+        sheet.cell(row=1, column=12, value='b')
+        sheet.cell(row=1, column=13, value='Предварительное отсечение точек')
+        sheet.cell(row=1, column=14, value='Порог предварительного отсечения')
+        sheet.cell(row=1, column=15, value='Выделение значимого региона')
+    ind = 2
+    while sheet.cell(row=ind, column=2).value:
+        ind += 1
+    for item in f:
+        sheet.cell(row=ind, column=1, value=item[0][0])
+        sheet.cell(row=ind, column=4, value=item[0][3])
+        sheet.cell(row=ind, column=5, value=item[0][4])
+        sheet.cell(row=ind, column=6, value=item[0][5])
+        sheet.cell(row=ind, column=7, value=item[0][6])
+        sheet.cell(row=ind, column=8, value=item[0][7])
+        sheet.cell(row=ind, column=9, value=item[0][8])
+        sheet.cell(row=ind, column=10, value=item[0][9])
+        sheet.cell(row=ind, column=11, value=item[0][10])
+        sheet.cell(row=ind, column=12, value=item[0][11])
+        sheet.cell(row=ind, column=13, value=item[0][12])
+        sheet.cell(row=ind, column=14, value=item[0][13])
+        sheet.cell(row=ind, column=15, value=item[0][14])
+        for i in range(item[0][1].shape[0]):
+            sheet.cell(row=ind, column=2, value=item[0][1][i])
+            sheet.cell(row=ind, column=3, value=item[0][2][i])
+            ind += 1
+    wb.save(result_file)
 
 
 # инициализация переменных (параметров и флагов)
@@ -238,11 +285,12 @@ elif mode == 2:
             non_max_fl = int(input()) - 1
             non_max_fl = bool(non_max_fl)
         elif punct == 7:
-            non_max_size_step = 1
             print('    Введите начальный размер окна: ')
             non_max_size_start = int(input())
             print('    Введите конечный размер окна (учтите, что шаг равен единице): ')
             non_max_size_finish = int(input())
+            print('    Введите шаг размера окна')
+            non_max_size_step = int(input())
         elif punct == 8:
             print('    1. Включить log-log scaled')
             print('    2. Выключить log-log scaled')
@@ -315,6 +363,22 @@ elif mode == 2:
     else:
         cut_th_list = np.arange(cut_th_start, cut_th_finish, cut_th_step)
 
+    print('По умолчанию результаты будут помещены в файл '
+          'C://Users/Настя/Documents/Компьютерное зрение/Исследование детектора Харриса/Results.xlsx')
+    print('Изменить имя файла (y(Y)/n(N))?')
+    symb = input()
+    if symb.lower() != 'n':
+        print('Введите имя файла, в котором будут храниться результаты, в формате C://путь/к/файлу/название.xlsx')
+        result_file = input()
+    else:
+        result_file = 'C://Users/Настя/Documents/Компьютерное зрение/Исследование детектора Харриса/Results.xlsx'
+        
+    # поиск углов
+    tstart = time.time()
     with cf.ThreadPoolExecutor() as tpe:
         f = tpe.map(find_corners, im_files)
-        print(list(f))
+    tfinish = time.time()
+    print('Сохраняю результаты')
+    save_results()
+    print('Программа завершена')
+    print('Время на поиск углов, сек:', tfinish - tstart)
